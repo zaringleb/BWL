@@ -6,27 +6,115 @@ import random
 import json
 import requests
 import codecs
-from collections import defaultdict
+import time
 from telegram.ext import CommandHandler
 from telegram.ext import MessageHandler, Filters
 from telegram.ext import Updater
 
 
 WORDS_REMAINDER_COUNT = 5
+TIME_BEFORE_REPEAT_INIT = 60*60*24
+TIME_BEFORE_REPEAT_MULT = 4
+USER_FILE_SUFFIX = ".txt"
 TELEGRAM_API = "https://api.telegram.org"
 dir_path = os.path.dirname(os.path.realpath(__file__))
 
 
+class Word():
+    def __init__(self, value):
+        self.value = value
+        self.events = []
+
+    def __str__(self):
+        return self.value
+
+    def create_event(self, eventtype):
+        self.events.append({'time': int(time.time()), 'eventtype': eventtype})
+
+    def success(self):
+        self.create_event('success')
+
+    def unsuccess(self):
+        self.create_event('unsuccess')
+
+    def get_last_success_time(self):
+        for event in self.events[::-1]:
+            if event['eventtype'] == 'success':
+                return event['time']
+
+    def number_of_success(self):
+        return len([event for event in self.events if event['eventtype'] == 'success'])
+
+    def last_is_success(self):
+        if self.events:
+            if self.events[-1]['eventtype'] == 'success':
+                return True
+        return False
+
+
+class UserWordList():
+    def __init__(self, username, filepath, logger):
+        self.logger = logger
+        self.username = username
+        self.filepath = filepath
+        self.words = []
+        self.current_word = None
+
+    def __len__(self):
+        return len(self.words)
+
+    def load_new_words(self, text):
+        new_words = text.split('\n')
+        new_words = set(new_words) - {str(word) for word in self.words}
+        for one in new_words:
+            self.words.append(Word(one))
+        self.logger.info('user: {}, number of added words: {}'.format(
+            self.username, len(new_words)))
+        return len(new_words)
+
+    def save_to_file(self):
+        with codecs.open(self.filepath, 'w') as f_out:
+            for word in self.words:
+                f_out.write("{}\n".format(word))
+
+    def load_from_file(self):
+        with codecs.open(self.filepath) as f_in:
+            self.load_new_words(f_in.read())
+
+    def choose(self):
+        current_time = int(time.time())
+        available_words = []
+        for word in self.words:
+            if word.last_is_success():
+                time_since_success = current_time - word.get_last_success_time()
+                if time_since_success > (TIME_BEFORE_REPEAT_INIT *
+                                             pow(TIME_BEFORE_REPEAT_MULT, word.number_of_success() - 1)):
+                    available_words.append(word)
+            else:
+                available_words.append(word)
+
+        if not available_words:
+            self.logger.info('user: {} no more words!'.format(
+                self.username))
+            return None
+        self.current_word = random.choice(available_words)
+        self.logger.info('user: {} number of available words: {}, currend word: {}'.format(
+                    self.username, len(available_words), self.current_word))
+        return str(self.current_word)
+
 class BotWordsLearner():
-    def __init__(self, filename, token, logger):
-        self.words = defaultdict(list)
-        self.current_word = defaultdict(str)
+    def __init__(self, path, token, logger):
+        self.path = path
         self.token = token
         self.logger = logger
+        self.users_word_lists = {}
 
     def start(self, bot, update):
         self._log_update(update)
-        bot.sendMessage(chat_id=update.message.chat_id, text="Please, send me file")
+        username = update.message.from_user.username
+        self.users_word_lists[username] = UserWordList(
+            username, os.path.join(self.path, 'user_data'), self.logger)
+        bot.sendMessage(chat_id=update.message.chat_id, text="Please, send me .txt file")
 
     def error(self, bot, update, error):
         self.logger.error('Update "%s" caused error "%s"' % (update, error))
@@ -37,12 +125,15 @@ class BotWordsLearner():
         message = update.message.text
         username = update.message.from_user.username
 
-        if message.lower() == 'y':
-            if self.current_word[username]:
-                self.words[username].remove(self.current_word[username])
-                if len(self.words[username]) % WORDS_REMAINDER_COUNT == 0:
-                    bot.sendMessage(chat_id=update.message.chat_id, text=len(self.words[username]))
-        bot.sendMessage(chat_id=update.message.chat_id, text=self._get_new_word(username))
+        if self.users_word_lists[username].current_word:
+            if message.lower() == 'y':
+                self.users_word_lists[username].current_word.success()
+            elif message.lower() == 'n':
+                self.users_word_lists[username].current_word.unsuccess()
+            message = self.users_word_lists[username].choose()
+        else:
+            message = 'Please send me file with words!'
+        bot.sendMessage(chat_id=update.message.chat_id, text=message)
 
     def document_load(self, bot, update):
         self._log_update(update)
@@ -53,35 +144,17 @@ class BotWordsLearner():
 
         file_url = '{}/file/bot{}/{}'.format(TELEGRAM_API, self.token, json.loads(answer.text)['result']['file_path'])
         result = requests.get(file_url)
-        with codecs.open(os.path.join(dir_path, username + '.txt'), 'w', encoding='utf-8') as f_out:
-            f_out.write(result.text)
+        #with codecs.open(os.path.join(dir_path, username + '.txt'), 'w', encoding='utf-8') as f_out:
+        #    f_out.write(result.text)
+        number_of_uploaded = self.users_word_lists[username].load_new_words(result.text)
 
-        self._restart(username)
-        bot.sendMessage(chat_id=update.message.chat_id, text="New words: {}".format(len(self.words[username])))
-        bot.sendMessage(chat_id=update.message.chat_id, text=self._get_new_word(username))
-
-    def _restart(self, username):
-        self.words[username] = self.get_words(os.path.join(dir_path, username + '.txt'))
-        self.current_word[username] = None
-
-
-    def _get_new_word(self, username):
-        if self.words[username]:
-            new_word = random.choice(self.words[username])
-            self.current_word[username] = new_word
-            return new_word
-        else:
-            return 'No more words!'
-
-    def get_words(self, filename):
-        with open(filename) as f:
-            return [line.strip() for line in f.readlines()]
+        bot.sendMessage(chat_id=update.message.chat_id, text="New words: {}".format(number_of_uploaded))
+        bot.sendMessage(chat_id=update.message.chat_id, text=self.users_word_lists[username].choose())
 
     def _log_update(self, update):
         self.logger.info('FROM: {} TEXT: {} CHART_ID: {}'.format(update.message.from_user.username,
                                                                  update.message.text.encode('UTF-8'),
                                                                  update.message.chat_id))
-
 
 def get_bot_token():
     with open('/home/zaringleb/.chip_token') as f:
@@ -95,7 +168,7 @@ def main():
     fh.setFormatter(logging.Formatter('%(asctime)s %(levelname)s:%(message)s'))
     logger.addHandler(fh)
 
-    bot_words_learner = BotWordsLearner(os.path.join(dir_path), get_bot_token(), logger)
+    bot_words_learner = BotWordsLearner(dir_path, get_bot_token(), logger)
 
     updater = Updater(token=bot_words_learner.token)
     dispatcher = updater.dispatcher
