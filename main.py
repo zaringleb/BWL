@@ -13,7 +13,7 @@ from telegram.ext import Updater
 
 
 WORDS_REMAINDER_COUNT = 5
-TIME_BEFORE_REPEAT_INIT = 60*60*24
+TIME_BEFORE_REPEAT_INIT = 60*60*12
 TIME_BEFORE_REPEAT_MULT = 4
 USER_FILE_SUFFIX = ".txt"
 TELEGRAM_API = "https://api.telegram.org"
@@ -21,12 +21,21 @@ dir_path = os.path.dirname(os.path.realpath(__file__))
 
 
 class Word():
-    def __init__(self, value):
+    def __init__(self, value, events=None):
         self.value = value
-        self.events = []
+        if events is None:
+            self.events = []
+        else:
+            self.events = events
 
     def __str__(self):
         return self.value
+
+    def __repr__(self):
+        if self.events:
+            return 'Word(value=\'{}\', events={})'.format(self.value, self.events)
+        else:
+            return 'Word(value=\'{}\')'.format(self.value)
 
     def create_event(self, eventtype):
         self.events.append({'time': int(time.time()), 'eventtype': eventtype})
@@ -51,7 +60,6 @@ class Word():
                 return True
         return False
 
-
 class UserWordList():
     def __init__(self, username, filepath, logger):
         self.logger = logger
@@ -73,15 +81,20 @@ class UserWordList():
         return len(new_words)
 
     def save_to_file(self):
-        with codecs.open(self.filepath, 'w') as f_out:
-            for word in self.words:
-                f_out.write("{}\n".format(word))
+        with codecs.open(os.path.join(self.filepath, self.username), 'w') as f_out:
+            data = {"current_word": self.current_word.__repr__(), "words": [word.__repr__() for word in self.words]}
+            f_out.write(json.dumps(data))
 
     def load_from_file(self):
-        with codecs.open(self.filepath) as f_in:
-            self.load_new_words(f_in.read())
+        with codecs.open(os.path.join(self.filepath, self.username)) as f_in:
+            data = json.loads(f_in.read())
+            self.current_word = eval(data['current_word'])
+            self.words = [eval(word) for word in data['words']]
+
 
     def choose(self):
+        if not self.words:
+            return "I need file from you to start :("
         current_time = int(time.time())
         available_words = []
         for word in self.words:
@@ -96,7 +109,8 @@ class UserWordList():
         if not available_words:
             self.logger.info('user: {} no more words!'.format(
                 self.username))
-            return None
+            self.current_word = None
+            return "Great job!\n For a moment you have learned everything, wait or send me more words."
         self.current_word = random.choice(available_words)
         self.logger.info('user: {} number of available words: {}, currend word: {}'.format(
                     self.username, len(available_words), self.current_word))
@@ -115,6 +129,18 @@ class BotWordsLearner():
         self.users_word_lists[username] = UserWordList(
             username, os.path.join(self.path, 'user_data'), self.logger)
         bot.sendMessage(chat_id=update.message.chat_id, text="Please, send me .txt file")
+
+    def save_to_disk(self):
+        for username in self.users_word_lists:
+            self.users_word_lists[username].save_to_file()
+
+    def load_from_disk(self):
+        self.logger.info("Start to load user data from disk")
+        for username in os.listdir(os.path.join(self.path, 'user_data')):
+            self.users_word_lists[username] = UserWordList(
+            username, os.path.join(self.path, 'user_data'), self.logger)
+            self.users_word_lists[username].load_from_file()
+            self.logger.info("Load {} words for user: {}".format(len(self.users_word_lists[username].words), username))
 
     def error(self, bot, update, error):
         self.logger.error('Update "%s" caused error "%s"' % (update, error))
@@ -169,6 +195,7 @@ def main():
     logger.addHandler(fh)
 
     bot_words_learner = BotWordsLearner(dir_path, get_bot_token(), logger)
+    bot_words_learner.load_from_disk()
 
     updater = Updater(token=bot_words_learner.token)
     dispatcher = updater.dispatcher
@@ -180,7 +207,8 @@ def main():
 
     updater.start_polling()
     updater.idle()
-
+    logger.critical('Finish session\n')
+    bot_words_learner.save_to_disk()
 
 if __name__ == '__main__':
     main()
