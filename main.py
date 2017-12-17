@@ -7,6 +7,7 @@ import json
 import requests
 import codecs
 import time
+from collections import Counter
 from telegram.ext import CommandHandler
 from telegram.ext import MessageHandler, Filters
 from telegram.ext import Updater
@@ -19,6 +20,7 @@ USER_FILE_SUFFIX = ".txt"
 TELEGRAM_API = "https://api.telegram.org"
 dir_path = os.path.dirname(os.path.realpath(__file__))
 
+# cron user_data backup "01 05 * * *  cp -r /home/zaringleb/BotWordsLearner/user_data /home/zaringleb/BotWordsLearner/user_data_backup"
 
 class Word():
     def __init__(self, value, events=None):
@@ -58,6 +60,11 @@ class Word():
         if self.events:
             if self.events[-1]['eventtype'] == 'success':
                 return True
+        return False
+
+    def is_new(self):
+        if not self.events:
+            return True
         return False
 
 class UserWordList():
@@ -116,6 +123,25 @@ class UserWordList():
                     self.username, len(available_words), self.current_word))
         return str(self.current_word)
 
+    def delete_current_word(self):
+        self.words.remove(self.current_word)
+        return '{} was deleted'.format(self.current_word)
+
+    def get_stat(self, period=None):
+        stat = Counter()
+        for word in self.words:
+            if word.last_is_success():
+                stat['repeat'] += 1
+            if word.is_new():
+                stat['new'] += 1
+            if (not word.is_new()) and (not word.last_is_success()):
+                stat['to learn'] += 1
+
+
+        return ", ".join(["{}: {}".format(key, stat[key]) for key in sorted(stat.keys())])
+
+
+
 class BotWordsLearner():
     def __init__(self, path, token, logger):
         self.path = path
@@ -129,6 +155,12 @@ class BotWordsLearner():
         self.users_word_lists[username] = UserWordList(
             username, os.path.join(self.path, 'user_data'), self.logger)
         bot.sendMessage(chat_id=update.message.chat_id, text="Please, send me .txt file")
+
+    def stat(self, bot, update):
+        self._log_update(update)
+        username = update.message.from_user.username
+        answer = self.users_word_lists[username].get_stat()
+        bot.sendMessage(chat_id=update.message.chat_id, text=answer)
 
     def save_to_disk(self):
         for username in self.users_word_lists:
@@ -156,6 +188,9 @@ class BotWordsLearner():
                 self.users_word_lists[username].current_word.success()
             elif message.lower() == 'n':
                 self.users_word_lists[username].current_word.unsuccess()
+            elif message.lower() == 'd':
+                answer = self.users_word_lists[username].delete_current_word()
+                bot.sendMessage(chat_id=update.message.chat_id, text=answer)
             message = self.users_word_lists[username].choose()
         else:
             message = 'Please send me file with words!'
@@ -201,6 +236,7 @@ def main():
     dispatcher = updater.dispatcher
 
     dispatcher.add_handler(CommandHandler('start', bot_words_learner.start))
+    dispatcher.add_handler(CommandHandler('stat', bot_words_learner.stat))
     dispatcher.add_handler(MessageHandler(Filters.text, bot_words_learner.talk))
     dispatcher.add_handler(MessageHandler(Filters.document, bot_words_learner.document_load))
     dispatcher.add_error_handler(bot_words_learner.error)
