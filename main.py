@@ -79,7 +79,7 @@ class UserWordList():
         return len(self.words)
 
     def load_new_words(self, text):
-        new_words = text.split('\n')
+        new_words = [one.strip() for one in text.split('\n') if one.strip()]
         new_words = set(new_words) - {str(word) for word in self.words}
         for one in new_words:
             self.words.append(Word(one))
