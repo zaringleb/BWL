@@ -16,6 +16,7 @@ from telegram.ext import Updater
 WORDS_REMAINDER_COUNT = 5
 TIME_BEFORE_REPEAT_INIT = 60*60*12
 TIME_BEFORE_REPEAT_MULT = 4
+TIME_BEFORE_REPEAT_WRONG = 60*3
 USER_FILE_SUFFIX = ".txt"
 TELEGRAM_API = "https://api.telegram.org"
 dir_path = os.path.dirname(os.path.realpath(__file__))
@@ -53,6 +54,11 @@ class Word():
             if event['eventtype'] == 'success':
                 return event['time']
 
+    def get_last_unsuccess_time(self):
+        for event in self.events[::-1]:
+            if event['eventtype'] == 'unsuccess':
+                return event['time']
+
     def number_of_success(self):
         return len([event for event in self.events if event['eventtype'] == 'success'])
 
@@ -74,13 +80,14 @@ class UserWordList():
         self.filepath = filepath
         self.words = []
         self.current_word = None
+        self.banned_words = []
 
     def __len__(self):
         return len(self.words)
 
     def load_new_words(self, text):
         new_words = [one.strip() for one in text.split('\n') if one.strip()]
-        new_words = set(new_words) - {str(word) for word in self.words}
+        new_words = set(new_words) - {str(word) for word in self.words} - {str(word) for word in self.banned_words}
         for one in new_words:
             self.words.append(Word(one))
         self.logger.info('user: {}, number of added words: {}'.format(
@@ -89,7 +96,9 @@ class UserWordList():
 
     def save_to_file(self):
         with codecs.open(os.path.join(self.filepath, self.username), 'w') as f_out:
-            data = {"current_word": self.current_word.__repr__(), "words": [word.__repr__() for word in self.words]}
+            data = {"current_word": self.current_word.__repr__(),
+                    "words": [word.__repr__() for word in self.words],
+                    "banned_words": [word.__repr__() for word in self.banned_words]}
             f_out.write(json.dumps(data))
 
     def load_from_file(self):
@@ -97,6 +106,7 @@ class UserWordList():
             data = json.loads(f_in.read())
             self.current_word = eval(data['current_word'])
             self.words = [eval(word) for word in data['words']]
+            self.banned_words = [eval(word) for word in data.get('banned_words', [])]
 
 
     def choose(self):
@@ -110,8 +120,12 @@ class UserWordList():
                 if time_since_success > (TIME_BEFORE_REPEAT_INIT *
                                              pow(TIME_BEFORE_REPEAT_MULT, word.number_of_success() - 1)):
                     available_words.append(word)
-            else:
+            elif word.is_new():
                 available_words.append(word)
+            else:
+                time_since_unsuccess = current_time - word.get_last_unsuccess_time()
+                if time_since_unsuccess > TIME_BEFORE_REPEAT_WRONG:
+                    available_words.append(word)
 
         if not available_words:
             self.logger.info('user: {} no more words!'.format(
@@ -124,6 +138,7 @@ class UserWordList():
         return str(self.current_word)
 
     def delete_current_word(self):
+        self.banned_words.append(self.current_word)
         self.words.remove(self.current_word)
         return '{} was deleted'.format(self.current_word)
 
@@ -140,7 +155,9 @@ class UserWordList():
 
         return ", ".join(["{}: {}".format(key, stat[key]) for key in sorted(stat.keys())])
 
-
+    def add_word(self, value):
+        self.words.append(Word(value))
+        return 'word {} was added'.format(value)
 
 class BotWordsLearner():
     def __init__(self, path, token, logger):
@@ -160,6 +177,15 @@ class BotWordsLearner():
         self._log_update(update)
         username = update.message.from_user.username
         answer = self.users_word_lists[username].get_stat()
+        bot.sendMessage(chat_id=update.message.chat_id, text=answer)
+
+    def add_word(self, bot, update, args):
+        self._log_update(update)
+        username = update.message.from_user.username
+        if args:
+            answer = self.users_word_lists[username].add_word(args[0])
+        else:
+            answer = 'no word was send'
         bot.sendMessage(chat_id=update.message.chat_id, text=answer)
 
     def save_to_disk(self):
@@ -183,7 +209,7 @@ class BotWordsLearner():
         message = update.message.text
         username = update.message.from_user.username
 
-        if self.users_word_lists[username].current_word:
+        if self.users_word_lists[username].words:
             if message.lower() == 'y':
                 self.users_word_lists[username].current_word.success()
             elif message.lower() == 'n':
@@ -237,6 +263,7 @@ def main():
 
     dispatcher.add_handler(CommandHandler('start', bot_words_learner.start))
     dispatcher.add_handler(CommandHandler('stat', bot_words_learner.stat))
+    dispatcher.add_handler(CommandHandler('add', bot_words_learner.add_word, pass_args=True))
     dispatcher.add_handler(MessageHandler(Filters.text, bot_words_learner.talk))
     dispatcher.add_handler(MessageHandler(Filters.document, bot_words_learner.document_load))
     dispatcher.add_error_handler(bot_words_learner.error)
