@@ -11,12 +11,14 @@ from collections import Counter
 from telegram.ext import CommandHandler
 from telegram.ext import MessageHandler, Filters
 from telegram.ext import Updater
+from telegram import ReplyKeyboardMarkup
 
 
 WORDS_REMAINDER_COUNT = 5
 TIME_BEFORE_REPEAT_INIT = 60*60*12
 TIME_BEFORE_REPEAT_MULT = 4
-TIME_BEFORE_REPEAT_WRONG = 60*3
+TIME_BEFORE_REPEAT_WRONG = 60*5
+MIN_AVAILABLE_WORDS = 30
 USER_FILE_SUFFIX = ".txt"
 TELEGRAM_API = "https://api.telegram.org"
 dir_path = os.path.dirname(os.path.realpath(__file__))
@@ -85,8 +87,18 @@ class UserWordList():
     def __len__(self):
         return len(self.words)
 
+    def is_ascii(self, value):
+        try:
+            value.encode('ascii')
+            return True
+        except UnicodeEncodeError:
+            return False
+
     def load_new_words(self, text):
         new_words = [one.strip() for one in text.split('\n') if one.strip()]
+        non_ascii_words = [one for one in new_words if not self.is_ascii(one)]
+        self.logger.info('user: {} not add {} non ascii words'.format(self.username, len(non_ascii_words)))
+        new_words = [one for one in new_words if self.is_ascii(one)]
         new_words = set(new_words) - {str(word) for word in self.words} - {str(word) for word in self.banned_words}
         for one in new_words:
             self.words.append(Word(one))
@@ -96,7 +108,7 @@ class UserWordList():
 
     def save_to_file(self):
         with codecs.open(os.path.join(self.filepath, self.username), 'w') as f_out:
-            data = {"current_word": self.current_word.__repr__(),
+            data = {"current_word": self.current_word.__repr__() if self.current_word else "None",
                     "words": [word.__repr__() for word in self.words],
                     "banned_words": [word.__repr__() for word in self.banned_words]}
             f_out.write(json.dumps(data))
@@ -114,6 +126,7 @@ class UserWordList():
             return "I need file from you to start :("
         current_time = int(time.time())
         available_words = []
+        new_available_words = []
         for word in self.words:
             if word.last_is_success():
                 time_since_success = current_time - word.get_last_success_time()
@@ -121,11 +134,14 @@ class UserWordList():
                                              pow(TIME_BEFORE_REPEAT_MULT, word.number_of_success() - 1)):
                     available_words.append(word)
             elif word.is_new():
-                available_words.append(word)
+                new_available_words.append(word)
             else:
                 time_since_unsuccess = current_time - word.get_last_unsuccess_time()
                 if time_since_unsuccess > TIME_BEFORE_REPEAT_WRONG:
                     available_words.append(word)
+
+        if len(available_words) < MIN_AVAILABLE_WORDS:
+            available_words.extend(new_available_words[:MIN_AVAILABLE_WORDS - len(available_words)])
 
         if not available_words:
             self.logger.info('user: {} no more words!'.format(
@@ -210,11 +226,11 @@ class BotWordsLearner():
         username = update.message.from_user.username
 
         if self.users_word_lists[username].words:
-            if message.lower() == 'y':
+            if message.lower() == 'yes':
                 self.users_word_lists[username].current_word.success()
-            elif message.lower() == 'n':
+            elif message.lower() == 'no':
                 self.users_word_lists[username].current_word.unsuccess()
-            elif message.lower() == 'd':
+            elif message.lower() == 'delete':
                 answer = self.users_word_lists[username].delete_current_word()
                 bot.sendMessage(chat_id=update.message.chat_id, text=answer)
             message = self.users_word_lists[username].choose()
@@ -243,6 +259,12 @@ class BotWordsLearner():
                                                                  update.message.text.encode('UTF-8'),
                                                                  update.message.chat_id))
 
+    def keyboard(self, bot, update):
+        self._log_update(update)
+        username = update.message.from_user.username
+        reply_keyboard = [['Yes', 'No', 'Skip', 'Delete'], ["/stat"]]
+        update.message.reply_text("keyboard: ", reply_markup=ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=False))
+
 def get_bot_token():
     with open('/home/zaringleb/.chip_token') as f:
         return f.readline().strip()
@@ -266,6 +288,7 @@ def main():
     dispatcher.add_handler(CommandHandler('add', bot_words_learner.add_word, pass_args=True))
     dispatcher.add_handler(MessageHandler(Filters.text, bot_words_learner.talk))
     dispatcher.add_handler(MessageHandler(Filters.document, bot_words_learner.document_load))
+    dispatcher.add_handler(CommandHandler('keyboard', bot_words_learner.keyboard))
     dispatcher.add_error_handler(bot_words_learner.error)
 
     updater.start_polling()
