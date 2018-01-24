@@ -189,19 +189,16 @@ class BotWordsLearner():
             username, os.path.join(self.path, 'user_data'), self.logger)
         bot.sendMessage(chat_id=update.message.chat_id, text="Please, send me .txt file")
 
+    def help(self, bot, update):
+        with open(os.path.join(self.path, 'help.txt')) as f:
+            text = f.read()
+        bot.sendMessage(chat_id=update.message.chat_id, text=text)
+        self._log_update(update)
+
     def stat(self, bot, update):
         self._log_update(update)
         username = update.message.from_user.username
         answer = self.users_word_lists[username].get_stat()
-        bot.sendMessage(chat_id=update.message.chat_id, text=answer)
-
-    def add_word(self, bot, update, args):
-        self._log_update(update)
-        username = update.message.from_user.username
-        if args:
-            answer = self.users_word_lists[username].add_word(args[0])
-        else:
-            answer = 'no word was send'
         bot.sendMessage(chat_id=update.message.chat_id, text=answer)
 
     def save_to_disk(self):
@@ -254,6 +251,8 @@ class BotWordsLearner():
         bot.sendMessage(chat_id=update.message.chat_id, text="New words: {}".format(number_of_uploaded))
         bot.sendMessage(chat_id=update.message.chat_id, text=self.users_word_lists[username].choose())
 
+        self.keyboard(bot, update)
+
     def _log_update(self, update):
         self.logger.info('FROM: {} TEXT: {} CHART_ID: {}'.format(update.message.from_user.username,
                                                                  update.message.text.encode('UTF-8'),
@@ -284,8 +283,8 @@ def main():
     dispatcher = updater.dispatcher
 
     dispatcher.add_handler(CommandHandler('start', bot_words_learner.start))
+    dispatcher.add_handler(CommandHandler('help', bot_words_learner.help))
     dispatcher.add_handler(CommandHandler('stat', bot_words_learner.stat))
-    dispatcher.add_handler(CommandHandler('add', bot_words_learner.add_word, pass_args=True))
     dispatcher.add_handler(MessageHandler(Filters.text, bot_words_learner.talk))
     dispatcher.add_handler(MessageHandler(Filters.document, bot_words_learner.document_load))
     dispatcher.add_handler(CommandHandler('keyboard', bot_words_learner.keyboard))
