@@ -14,18 +14,13 @@ from telegram.ext import Updater
 from telegram import ReplyKeyboardMarkup
 
 
-WORDS_REMAINDER_COUNT = 5
-TIME_BEFORE_REPEAT_INIT = 60*60*12
-TIME_BEFORE_REPEAT_MULT = 4
-TIME_BEFORE_REPEAT_WRONG = 60*5
-MIN_AVAILABLE_WORDS = 30
-USER_FILE_SUFFIX = ".txt"
-TELEGRAM_API = "https://api.telegram.org"
 dir_path = os.path.dirname(os.path.realpath(__file__))
 
 # cron user_data backup "01 05 * * *  cp -r /home/zaringleb/BotWordsLearner/user_data /home/zaringleb/BotWordsLearner/user_data_backup"
 
 class Word():
+    success_event = "success"
+    unsuccess_event = "unsuccess"
     def __init__(self, value, events=None):
         self.value = value
         if events is None:
@@ -46,27 +41,27 @@ class Word():
         self.events.append({'time': int(time.time()), 'eventtype': eventtype})
 
     def success(self):
-        self.create_event('success')
+        self.create_event(self.success_event)
 
     def unsuccess(self):
-        self.create_event('unsuccess')
+        self.create_event(self.unsuccess_event)
 
     def get_last_success_time(self):
         for event in self.events[::-1]:
-            if event['eventtype'] == 'success':
+            if event['eventtype'] == self.success_event:
                 return event['time']
 
     def get_last_unsuccess_time(self):
         for event in self.events[::-1]:
-            if event['eventtype'] == 'unsuccess':
+            if event['eventtype'] == self.unsuccess_event:
                 return event['time']
 
     def number_of_success(self):
-        return len([event for event in self.events if event['eventtype'] == 'success'])
+        return len([event for event in self.events if event['eventtype'] == self.success_event])
 
     def last_is_success(self):
         if self.events:
-            if self.events[-1]['eventtype'] == 'success':
+            if self.events[-1]['eventtype'] == self.success_event:
                 return True
         return False
 
@@ -76,10 +71,11 @@ class Word():
         return False
 
 class UserWordList():
-    def __init__(self, username, filepath, logger):
+    def __init__(self, username, filepath, logger, config):
         self.logger = logger
         self.username = username
         self.filepath = filepath
+        self.config = config
         self.words = []
         self.current_word = None
         self.banned_words = []
@@ -120,7 +116,6 @@ class UserWordList():
             self.words = [eval(word) for word in data['words']]
             self.banned_words = [eval(word) for word in data.get('banned_words', [])]
 
-
     def choose(self):
         if not self.words:
             return "I need file from you to start :("
@@ -130,18 +125,20 @@ class UserWordList():
         for word in self.words:
             if word.last_is_success():
                 time_since_success = current_time - word.get_last_success_time()
-                if time_since_success > (TIME_BEFORE_REPEAT_INIT *
-                                             pow(TIME_BEFORE_REPEAT_MULT, word.number_of_success() - 1)):
+                if time_since_success > min((eval(self.config["TIME_BEFORE_REPEAT_INIT"]) *
+                                            pow(eval(self.config["TIME_BEFORE_REPEAT_MULT"]),
+                                                word.number_of_success() - 1)),
+                                        eval(self.config["TIME_BEFORE_REPEAT_MAX"])):
                     available_words.append(word)
             elif word.is_new():
                 new_available_words.append(word)
             else:
                 time_since_unsuccess = current_time - word.get_last_unsuccess_time()
-                if time_since_unsuccess > TIME_BEFORE_REPEAT_WRONG:
+                if time_since_unsuccess > eval(self.config["TIME_BEFORE_REPEAT_WRONG"]):
                     available_words.append(word)
 
-        if len(available_words) < MIN_AVAILABLE_WORDS:
-            available_words.extend(new_available_words[:MIN_AVAILABLE_WORDS - len(available_words)])
+        if len(available_words) < self.config["MIN_AVAILABLE_WORDS"]:
+            available_words.extend(new_available_words[:self.config["MIN_AVAILABLE_WORDS"] - len(available_words)])
 
         if not available_words:
             self.logger.info('user: {} no more words!'.format(
@@ -176,23 +173,24 @@ class UserWordList():
         return 'word {} was added'.format(value)
 
 class BotWordsLearner():
-    def __init__(self, path, token, logger):
+    def __init__(self, path, token, logger, config):
         self.path = path
         self.token = token
         self.logger = logger
+        self.config = config
         self.users_word_lists = {}
 
     def start(self, bot, update):
         self._log_update(update)
         username = update.message.from_user.username
         self.users_word_lists[username] = UserWordList(
-            username, os.path.join(self.path, 'user_data'), self.logger)
-        bot.sendMessage(chat_id=update.message.chat_id, text="Please, send me .txt file")
+            username, os.path.join(self.path, self.config["user_data_dir"]), self.logger, self.config['word_list'])
+        bot.sendMessage(chat_id=update.message.chat_id, text="Please, send me file")
 
     def help(self, bot, update):
-        with open(os.path.join(self.path, 'help.txt')) as f:
+        with open(os.path.join(self.path, self.config["help_filename"])) as f:
             text = f.read()
-        bot.sendMessage(chat_id=update.message.chat_id, text=text)
+        bot.sendMessage(chat_id=update.message.chat_id, text=text.format(**self.config['talk']))
         self._log_update(update)
 
     def stat(self, bot, update):
@@ -207,9 +205,9 @@ class BotWordsLearner():
 
     def load_from_disk(self):
         self.logger.info("Start to load user data from disk")
-        for username in os.listdir(os.path.join(self.path, 'user_data')):
+        for username in os.listdir(os.path.join(self.path, self.config["user_data_dir"])):
             self.users_word_lists[username] = UserWordList(
-            username, os.path.join(self.path, 'user_data'), self.logger)
+            username, os.path.join(self.path, self.config["user_data_dir"]), self.logger, self.config['word_list'])
             self.users_word_lists[username].load_from_file()
             self.logger.info("Load {} words for user: {}".format(len(self.users_word_lists[username].words), username))
 
@@ -219,30 +217,37 @@ class BotWordsLearner():
     def talk(self, bot, update):
         self._log_update(update)
 
-        message = update.message.text
+        talk = self.config['talk']
+
+        message = update.message.text.lower()
         username = update.message.from_user.username
 
         if self.users_word_lists[username].words:
-            if message.lower() == 'yes':
-                self.users_word_lists[username].current_word.success()
-            elif message.lower() == 'no':
-                self.users_word_lists[username].current_word.unsuccess()
-            elif message.lower() == 'delete':
-                answer = self.users_word_lists[username].delete_current_word()
-                bot.sendMessage(chat_id=update.message.chat_id, text=answer)
-            message = self.users_word_lists[username].choose()
+            if message in talk.values():
+                if message == talk['yes']:
+                    self.users_word_lists[username].current_word.success()
+                elif message == talk['no']:
+                    self.users_word_lists[username].current_word.unsuccess()
+                elif message == talk['delete']:
+                    answer = self.users_word_lists[username].delete_current_word()
+                    bot.sendMessage(chat_id=update.message.chat_id, text=answer)
+                elif message == talk['next']:
+                    pass
+                reply = self.users_word_lists[username].choose()
+            else:
+                reply = 'Sorry, I don`t understand you, try /help'
         else:
-            message = 'Please send me file with words!'
-        bot.sendMessage(chat_id=update.message.chat_id, text=message)
+            reply = 'Please send me file with words!'
+        bot.sendMessage(chat_id=update.message.chat_id, text=reply)
 
     def document_load(self, bot, update):
         self._log_update(update)
 
         username = update.message.from_user.username
-        json_url = '{}/bot{}/getFile?file_id={}'.format(TELEGRAM_API, self.token, update.message.document['file_id'])
+        json_url = '{}/bot{}/getFile?file_id={}'.format(self.config["TELEGRAM_API"], self.token, update.message.document['file_id'])
         answer = requests.get(json_url)
 
-        file_url = '{}/file/bot{}/{}'.format(TELEGRAM_API, self.token, json.loads(answer.text)['result']['file_path'])
+        file_url = '{}/file/bot{}/{}'.format(self.config["TELEGRAM_API"], self.token, json.loads(answer.text)['result']['file_path'])
         result = requests.get(file_url)
         #with codecs.open(os.path.join(dir_path, username + '.txt'), 'w', encoding='utf-8') as f_out:
         #    f_out.write(result.text)
@@ -261,22 +266,28 @@ class BotWordsLearner():
     def keyboard(self, bot, update):
         self._log_update(update)
         username = update.message.from_user.username
-        reply_keyboard = [['Yes', 'No', 'Skip', 'Delete'], ["/stat"]]
+        reply_keyboard = [[self.config['talk']['yes'], self.config['talk']['no'],
+                            self.config['talk']['next'], self.config['talk']['delete']],
+                           ["/stat"]]
         update.message.reply_text("keyboard: ", reply_markup=ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=False))
 
-def get_bot_token():
-    with open('/home/zaringleb/.chip_token') as f:
+def get_bot_token(token_path):
+    with open(token_path) as f:
         return f.readline().strip()
 
 
 def main():
+    with open(os.path.join(dir_path, 'config.json')) as config_file:
+        config = json.loads(config_file.read())['main']
+
     logger = logging.getLogger(__name__)
     logger.setLevel(logging.INFO)
-    fh = logging.FileHandler(os.path.join(dir_path, 'bot.log'))
+    fh = logging.FileHandler(os.path.join(dir_path, config["log_filename"]))
     fh.setFormatter(logging.Formatter('%(asctime)s %(levelname)s:%(message)s'))
     logger.addHandler(fh)
 
-    bot_words_learner = BotWordsLearner(dir_path, get_bot_token(), logger)
+    bot_words_learner = BotWordsLearner(dir_path, get_bot_token(config["token_path"]), logger,
+                                        config["bot_words_learner"])
     bot_words_learner.load_from_disk()
 
     updater = Updater(token=bot_words_learner.token)

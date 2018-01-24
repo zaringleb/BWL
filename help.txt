@@ -1,0 +1,17 @@
+available commands:
+/help - send this massage
+/stat - get your words statistics
+/keyboard - send me keyboard
+/start - ONLY if you want restart everything
+
+For the beginning you should send a file with word separated by '\n'. For now only ascii letters available.
+
+You can reply to word by:
+{yes} (you remember this word)
+{no} (you don`t)
+{next} (for sending another word)
+{delete} (for get rid of this word)
+
+Also you can reply using keyboard.
+
+Any questions you can ask to @zaringleb

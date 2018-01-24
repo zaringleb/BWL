@@ -1,0 +1,24 @@
+{
+  "main": {
+    "log_filename": "bot.log",
+    "token_path": "/home/zaringleb/.chip_token",
+    "bot_words_learner": {
+      "user_data_dir": "user_data",
+      "help_filename": "help.txt",
+      "talk": {
+        "yes": "yes",
+        "no": "no",
+        "next": "next",
+        "delete": "delete"
+      },
+      "TELEGRAM_API": "https://api.telegram.org",
+      "word_list": {
+        "TIME_BEFORE_REPEAT_INIT": "60*60*12",
+        "TIME_BEFORE_REPEAT_MULT": "4",
+        "TIME_BEFORE_REPEAT_MAX": "60*60*24*182",
+        "TIME_BEFORE_REPEAT_WRONG": "60*5",
+        "MIN_AVAILABLE_WORDS": 25
+      }
+    }
+  }
+}
