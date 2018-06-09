@@ -1,7 +1,12 @@
 {
   "main": {
     "log_filename": "bot.log",
-    "token_path": "/home/zaringleb/.chip_token",
+    "token_path": "/home/zaringleb/.telegram/chip_token",
+    "api": {
+      "app_id": "63ad1894",
+      "app_key_path": "/home/zaringleb/.app_key",
+      "cash_file": "cash.json"
+    },
     "bot_words_learner": {
       "user_data_dir": "user_data",
       "help_filename": "help.txt",
