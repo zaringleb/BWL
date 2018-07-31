@@ -7,15 +7,16 @@ import requests
 from telegram.ext import CommandHandler
 from telegram.ext import MessageHandler, Filters
 from telegram.ext import Updater
+from telegram.ext import JobQueue
 from telegram import ReplyKeyboardMarkup
+from telegram import Bot
+#  https://github.com/python-telegram-bot/python-telegram-bot
 
 from word_tools import UserWordList
 from word_tools import OxfordApi
 
 
 dir_path = os.path.dirname(os.path.realpath(__file__))
-
-# cron user_data backup "01 05 * * *  cp -r /home/zaringleb/BotWordsLearner/user_data /home/zaringleb/BotWordsLearner/user_data_backup"
 
 
 class BotWordsLearner():
@@ -125,6 +126,14 @@ def get_bot_token(token_path):
         return f.readline().strip()
 
 
+def run_and_log(function_to_run, logger):
+    def run(bot, job):
+        logger.info("Start run {}".format(function_to_run))
+        function_to_run()
+        logger.info("Finish run {}".format(function_to_run))
+    return run
+
+
 def main():
     with open(os.path.join(dir_path, 'config.json')) as config_file:
         config = json.loads(config_file.read())['main']
@@ -140,6 +149,10 @@ def main():
     bot_words_learner = BotWordsLearner(dir_path, get_bot_token(config["token_path"]), logger,
                                         config["bot_words_learner"], api)
     bot_words_learner.load_from_disk()
+
+    job_queue = JobQueue(Bot(get_bot_token(config["token_path"])))
+    job_queue.run_repeating(run_and_log(bot_words_learner.save_to_disk, logger), 60 * 60)
+    job_queue.start()
 
     updater = Updater(token=bot_words_learner.token)
     dispatcher = updater.dispatcher
@@ -157,6 +170,7 @@ def main():
     logger.critical('Finish session\n')
     bot_words_learner.save_to_disk()
     api.cash.save()
+    job_queue.stop()
 
 
 if __name__ == '__main__':
