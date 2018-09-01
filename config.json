@@ -1,10 +1,10 @@
 {
   "main": {
     "log_filename": "bot.log",
-    "token_path": "/home/zaringleb/.telegram/chip_token",
+    "token_path": "/home/ubuntu/.chip_token",
     "api": {
       "app_id": "63ad1894",
-      "app_key_path": "/home/zaringleb/.app_key",
+      "app_key_path": "/home/ubuntu/.app_key",
       "cash_file": "cash.json"
     },
     "bot_words_learner": {
