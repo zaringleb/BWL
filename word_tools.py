@@ -1,15 +1,13 @@
-# -*- coding: utf-8 -*-
-
-import os
-import random
 import json
 import codecs
-import time
+import os
 import requests
+import random
+import time
 from collections import Counter
 
 
-class Word():
+class Word:
     success_event = "success"
     unsuccess_event = "unsuccess"
 
@@ -26,7 +24,8 @@ class Word():
 
     def __repr__(self):
         if self.events:
-            return 'Word(value=\'{}\', events={}, frequency={})'.format(self.value, self.events, self.frequency)
+            return 'Word(value=\'{}\', events={}, frequency={})'.format(self.value, self.events,
+                                                                        self.frequency)
         else:
             return 'Word(value=\'{}\', frequency={})'.format(self.value, self.frequency)
 
@@ -64,7 +63,7 @@ class Word():
         return False
 
 
-class UserWordList():
+class UserWordList:
     def __init__(self, username, filepath, logger, config):
         self.logger = logger
         self.username = username
@@ -78,7 +77,8 @@ class UserWordList():
     def __len__(self):
         return len(self.words)
 
-    def is_ascii(self, value):
+    @staticmethod
+    def is_ascii(value):
         try:
             value.encode('ascii')
             return True
@@ -88,13 +88,15 @@ class UserWordList():
     def load_new_words(self, text, api):
         new_words = [one.strip() for one in text.split('\n') if one.strip()]
         new_words = [one for one in new_words if self.is_ascii(one)]
-        new_words = set(new_words) - {str(word) for word in self.words} - {str(word) for word in self.banned_words}
+        new_words = (set(new_words) - {str(word) for word in self.words}
+                     - {str(word) for word in self.banned_words})
         added_words = []
         for one in new_words:
             result = api.get_root_form_and_frequency(one)
             if result:
                 root_from, frequency = result
-                if root_from not in {str(word) for word in self.words} and root_from not in {str(word) for word in self.banned_words}:
+                if root_from not in {str(word) for word in self.words} and \
+                        root_from not in {str(word) for word in self.banned_words}:
                     word = Word(root_from, frequency=frequency)
                     if frequency >= 1:
                         self.words.append(word)
@@ -133,7 +135,7 @@ class UserWordList():
                 if time_since_success > min((eval(self.config["TIME_BEFORE_REPEAT_INIT"]) *
                                             pow(eval(self.config["TIME_BEFORE_REPEAT_MULT"]),
                                                 word.number_of_success() - 1)),
-                                        eval(self.config["TIME_BEFORE_REPEAT_MAX"])):
+                                            eval(self.config["TIME_BEFORE_REPEAT_MAX"])):
                     available_words.append(word)
             elif word.is_new():
                 new_available_words.append(word)
@@ -143,13 +145,16 @@ class UserWordList():
                     available_words.append(word)
 
         if len(available_words) < self.config["MIN_AVAILABLE_WORDS"]:
-            available_words.extend(new_available_words[:self.config["MIN_AVAILABLE_WORDS"] - len(available_words)])
+            available_words.extend(
+                new_available_words[:self.config["MIN_AVAILABLE_WORDS"] - len(available_words)]
+            )
 
         if not available_words:
             self.logger.info('user: {} no more words!'.format(
                 self.username))
             self.current_word = None
-            return "Great job!\n For a moment you have learned everything, wait or send me more words."
+            return '''Great job!
+            For a moment you have learned everything, wait or send me more words.'''
         self.current_word = random.choice(available_words)
         self.logger.info('user: {} number of available words: {}, currend word: {}'.format(
                     self.username, len(available_words), self.current_word))
@@ -160,7 +165,7 @@ class UserWordList():
         self.words.remove(self.current_word)
         return '{} was deleted'.format(self.current_word)
 
-    def get_stat(self, period=None):
+    def get_stat(self):
         stat = Counter()
         for word in self.words:
             if word.last_is_success():
@@ -178,6 +183,7 @@ class UserWordList():
 
 
 class OxfordApi(object):
+    # https://developer.oxforddictionaries.com/documentation#/Dictionary32entries
     def __init__(self, config, logger):
         self.app_id = config['app_id']
         with open(config['app_key_path']) as app_key_file:
@@ -198,7 +204,8 @@ class OxfordApi(object):
         return result
 
     def _get_frequency(self, word):
-        url = self.url + 'stats/frequency/word/' + self.language + '/?corpus=nmc&lemma=' + word.lower()
+        url = "{}stats/frequency/word/{}/?corpus=nmc&lemma={}".format(self.url,
+                                                                      self.language, word.lower())
         r = requests.get(url, headers={'app_id': self.app_id, 'app_key': self.app_key})
         try:
             result = r.json()['result']['normalizedFrequency']

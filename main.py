@@ -1,25 +1,19 @@
-# -*- coding: utf-8 -*-
-
-import os
-import logging
 import json
+import logging
+import os
 import requests
-from telegram.ext import CommandHandler
-from telegram.ext import MessageHandler, Filters
-from telegram.ext import Updater
-from telegram.ext import JobQueue
-from telegram import ReplyKeyboardMarkup
-from telegram import Bot
+
+from telegram.ext import CommandHandler, MessageHandler, Filters, Updater, JobQueue
+from telegram import Bot, ReplyKeyboardMarkup
 #  https://github.com/python-telegram-bot/python-telegram-bot
 
-from word_tools import UserWordList
-from word_tools import OxfordApi
+from word_tools import UserWordList, OxfordApi
 
 
 dir_path = os.path.dirname(os.path.realpath(__file__))
 
 
-class BotWordsLearner():
+class BotWordsLearner:
     def __init__(self, path, token, logger, config, api):
         self.path = path
         self.token = token
@@ -32,7 +26,8 @@ class BotWordsLearner():
         self._log_update(update)
         username = update.message.from_user.username
         self.users_word_lists[username] = UserWordList(
-            username, os.path.join(self.path, self.config["user_data_dir"]), self.logger, self.config['word_list'])
+            username, os.path.join(self.path, self.config["user_data_dir"]), self.logger,
+            self.config['word_list'])
         bot.sendMessage(chat_id=update.message.chat_id, text="Please, send me file")
 
     def help(self, bot, update):
@@ -44,8 +39,8 @@ class BotWordsLearner():
     def stat(self, bot, update):
         self._log_update(update)
         username = update.message.from_user.username
-        answer = self.users_word_lists[username].get_stat()
-        bot.sendMessage(chat_id=update.message.chat_id, text=answer)
+        reply = self.users_word_lists[username].get_stat()
+        bot.sendMessage(chat_id=update.message.chat_id, text=reply)
 
     def save_to_disk(self):
         for username in self.users_word_lists:
@@ -55,12 +50,15 @@ class BotWordsLearner():
         self.logger.info("Start to load user data from disk")
         for username in os.listdir(os.path.join(self.path, self.config["user_data_dir"])):
             self.users_word_lists[username] = UserWordList(
-            username, os.path.join(self.path, self.config["user_data_dir"]), self.logger, self.config['word_list'])
+                username, os.path.join(self.path, self.config["user_data_dir"]),
+                self.logger, self.config['word_list'])
             self.users_word_lists[username].load_from_file()
-            self.logger.info("Load {} words for user: {}".format(len(self.users_word_lists[username].words), username))
+            self.logger.info("Load {} words for user: {}".format(
+                len(self.users_word_lists[username].words), username)
+            )
 
-    def error(self, bot, update, error):
-        self.logger.error('Update "%s" caused error "%s"' % (update, error))
+    def error(self, _, update, error):
+        self.logger.error('Update {} caused error {}'.format(update, error))
 
     def talk(self, bot, update):
         self._log_update(update)
@@ -90,35 +88,42 @@ class BotWordsLearner():
 
     def document_load(self, bot, update):
         username = update.message.from_user.username
-        self.logger.info("FROM: {}, document_load".format(username))
-        json_url = '{}/bot{}/getFile?file_id={}'.format(self.config["TELEGRAM_API"], self.token, update.message.document['file_id'])
+        self.logger.info("FROM: {}, loading document".format(username))
+        json_url = '{}/bot{}/getFile?file_id={}'.format(
+            self.config["TELEGRAM_API"], self.token, update.message.document['file_id']
+        )
         answer = requests.get(json_url)
 
-        file_url = '{}/file/bot{}/{}'.format(self.config["TELEGRAM_API"], self.token, json.loads(answer.text)['result']['file_path'])
+        file_url = '{}/file/bot{}/{}'.format(
+            self.config["TELEGRAM_API"], self.token, json.loads(answer.text)['result']['file_path']
+        )
         result = requests.get(file_url)
-        #with codecs.open(os.path.join(dir_path, username + '.txt'), 'w', encoding='utf-8') as f_out:
-        #    f_out.write(result.text)
         added_words = self.users_word_lists[username].load_new_words(result.text, self.api)
 
-        bot.sendMessage(chat_id=update.message.chat_id, text="Number of added words: {}".format(len(added_words)))
         bot.sendMessage(chat_id=update.message.chat_id,
-                        text="\n".join(map(str, added_words)))
-        bot.sendMessage(chat_id=update.message.chat_id, text=self.users_word_lists[username].choose())
+                        text="Number of added words: {}".format(len(added_words)))
+        bot.sendMessage(chat_id=update.message.chat_id,
+                        text="\n".join(map(str, sorted(added_words))))
+        bot.sendMessage(chat_id=update.message.chat_id,
+                        text=self.users_word_lists[username].choose())
 
         self.keyboard(bot, update)
 
     def _log_update(self, update):
-        self.logger.info('FROM: {} TEXT: {} CHART_ID: {}'.format(update.message.from_user.username,
-                                                                 update.message.text.encode('UTF-8'),
-                                                                 update.message.chat_id))
+        self.logger.info('FROM: {} TEXT: {} CHART_ID: {}'.format(
+            update.message.from_user.username,
+            update.message.text.encode('UTF-8'),
+            update.message.chat_id)
+        )
 
-    def keyboard(self, bot, update):
+    def keyboard(self, _, update):
         self._log_update(update)
-        username = update.message.from_user.username
         reply_keyboard = [[self.config['talk']['yes'], self.config['talk']['no'],
-                            self.config['talk']['next'], self.config['talk']['delete']],
-                           ["/stat"]]
-        update.message.reply_text("keyboard: ", reply_markup=ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=False))
+                           self.config['talk']['next'], self.config['talk']['delete']],
+                          ["/stat"]]
+        update.message.reply_text("keyboard: ",
+                                  reply_markup=ReplyKeyboardMarkup(reply_keyboard,
+                                                                   one_time_keyboard=False))
 
 
 def get_bot_token(token_path):
@@ -134,15 +139,20 @@ def run_and_log(function_to_run, logger):
     return run
 
 
+def get_logger(file_log_name):
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.INFO)
+    fh = logging.FileHandler(os.path.join(dir_path, file_log_name))
+    fh.setFormatter(logging.Formatter('%(asctime)s %(levelname)s:%(message)s'))
+    logger.addHandler(fh)
+    return logger
+
+
 def main():
     with open(os.path.join(dir_path, 'config.json')) as config_file:
         config = json.loads(config_file.read())['main']
 
-    logger = logging.getLogger(__name__)
-    logger.setLevel(logging.INFO)
-    fh = logging.FileHandler(os.path.join(dir_path, config["log_filename"]))
-    fh.setFormatter(logging.Formatter('%(asctime)s %(levelname)s:%(message)s'))
-    logger.addHandler(fh)
+    logger = get_logger(config["log_filename"])
 
     api = OxfordApi(config['api'], logger)
 
