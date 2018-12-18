@@ -87,8 +87,6 @@ class UserWordList():
 
     def load_new_words(self, text, api):
         new_words = [one.strip() for one in text.split('\n') if one.strip()]
-        # non_ascii_words = [one for one in new_words if not self.is_ascii(one)]
-        # self.logger.info('user: {} not add {} non ascii words'.format(self.username, len(non_ascii_words)))
         new_words = [one for one in new_words if self.is_ascii(one)]
         new_words = set(new_words) - {str(word) for word in self.words} - {str(word) for word in self.banned_words}
         added_words = []
