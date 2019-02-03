@@ -121,6 +121,13 @@ class UserWordList():
             self.banned_words = [eval(word) for word in data.get('banned_words', [])]
             self.low_frequency = [eval(word) for word in data.get('low_frequency', [])]
 
+    def is_need_to_repeat(self, word, current_time):
+        time_since_success = current_time - word.get_last_success_time()
+        return time_since_success > min((eval(self.config["TIME_BEFORE_REPEAT_INIT"]) *
+                                         pow(eval(self.config["TIME_BEFORE_REPEAT_MULT"]),
+                                             word.number_of_success() - 1)),
+                                        eval(self.config["TIME_BEFORE_REPEAT_MAX"]))
+
     def choose(self):
         if not self.words:
             return "I need file from you to start :("
@@ -129,11 +136,7 @@ class UserWordList():
         new_available_words = []
         for word in self.words:
             if word.last_is_success():
-                time_since_success = current_time - word.get_last_success_time()
-                if time_since_success > min((eval(self.config["TIME_BEFORE_REPEAT_INIT"]) *
-                                            pow(eval(self.config["TIME_BEFORE_REPEAT_MULT"]),
-                                                word.number_of_success() - 1)),
-                                        eval(self.config["TIME_BEFORE_REPEAT_MAX"])):
+                if self.is_need_to_repeat(word, current_time):
                     available_words.append(word)
             elif word.is_new():
                 new_available_words.append(word)
@@ -160,11 +163,15 @@ class UserWordList():
         self.words.remove(self.current_word)
         return '{} was deleted'.format(self.current_word)
 
-    def get_stat(self, period=None):
+    def get_stat(self):
         stat = Counter()
+        current_time = int(time.time())
         for word in self.words:
             if word.last_is_success():
-                stat['repeat'] += 1
+                if self.is_need_to_repeat(word, current_time):
+                    stat['to_repeat'] += 1
+                else:
+                    stat['learned'] += 1
             if word.is_new():
                 stat['new'] += 1
             if (not word.is_new()) and (not word.last_is_success()):
